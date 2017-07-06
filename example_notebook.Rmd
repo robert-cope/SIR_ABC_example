@@ -127,6 +127,23 @@ ggplot(tryABC2,aes(x=beta,y=gamma))+geom_point(alpha=0.4)+geom_density2d()+theme
 
 
 
+#########
+#########
+A simple differential equation model of the same epidemic...
+```{r}
+t<- (1:1000) / 100
+Sd <- rep(Ntot,length(x))
+Id <- rep(1,length(x))
+deDF<-data.frame(x,Sd,Id)
+for(i in 2:1000){ # Euler's method
+ deDF$Sd[i]<-deDF$Sd[i-1]+.01*(-beta1*deDF$Sd[i-1]*deDF$Id[i-1]/(Ntot - 1))
+ deDF$Id[i]<-deDF$Id[i-1]+.01*(beta1*deDF$Sd[i-1]*deDF$Id[i-1]/(Ntot - 1) - gamma1*deDF$Id[i-1])
+}
+ggplot(deDF,aes(x=t,y=Id))+geom_line(size=2,col='red')+theme_grey(base_size=18)+xlim(0,10)+ylim(0,Ntot)
+```
+
+
+
 
 
 
