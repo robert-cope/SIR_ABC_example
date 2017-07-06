@@ -1,0 +1,133 @@
+---
+title: "SIR_ABC_example"
+output: html_notebook
+---
+This document contains some toy examples of a continuous-time Markov chain model for an SIR epidemic, and doing some basic Bayesian inference on this model using approximate Bayesian computation (ABC).
+
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+simulateSIR<-function(N,I0,beta1,gamma1){
+  #uses the (Doob-)Gillespie algorithm
+  S <- N - I0
+  I <- I0
+  R <- 0
+  t<-0
+  iDF<-data.frame(S,I,t)
+  c<-1
+  while(I > 0){
+    rTot <- beta1*S*I / (N-1) + gamma1*I
+    t <- t + rexp(1,rTot)
+    iDF[2*c,]<-c(S,I,t)
+    if(runif(1) < (beta1*S*I / (N-1))/rTot){
+      S <- S - 1
+      I <- I + 1
+    } else {
+      I <- I - 1
+      R <- R + 1
+    }
+    iDF[2*c+1,]<-c(S,I,t)
+    c<-c+1
+  }
+  return(iDF) #the dataframe is in a format to make nice plots
+}
+```
+
+```{r}
+Ntot<- 20
+beta1 <- 2
+gamma1<-1
+egDF<-simulateSIR(Ntot,1,beta1,gamma1)
+#ggplot(egDF,aes(x=t,y=I))+geom_line(size=2,col='red')+theme_grey(base_size=18)+xlim(0,10)+ylim(0,20)
+ggplot(egDF,aes(x=t,y=I))+geom_line(size=2,col='red')+theme_grey(base_size=18)+xlim(0,10)+ylim(0,Ntot)+geom_line(data=egDF,aes(x=t,y=S),size=2,col='blue')
+```
+
+
+```{r}
+finalSize<-function(Nt,beta1,gamma1){
+  #calculates exact final size using the DA representation
+  #Black, A. J., & Ross, J. V. (2015). Computation of epidemic final size distributions. Journal of theoretical biology, 367, 159-165.
+beta <- beta1/(Nt-1)
+q <- (1:(Nt+1))*0
+q[2] <- 1
+for (Z2 in 0:Nt) {
+    for (Z1 in (Z2+1):(Nt-1)){
+        p1 <- 1 / ( 1 + gamma1/(beta*(Nt-Z1)))
+        q[Z1+2] <- q[Z1+2] + q[Z1+1]*p1
+        q[Z1+1] <- q[Z1+1]*(1-p1)
+}
+}
+return(q[1:(Nt+1)])
+}
+fs<-finalSize(Ntot,beta1,gamma1)
+fDF<-data.frame(I = 0:(length(fs)-1),probability = fs)
+#ggplot(fDF,aes(x=I,y=probability))+geom_bar(stat='identity')+theme_grey(base_size=18)
+```
+
+
+```{r}
+simDF<-data.frame(x=0:Ntot,count = (0:Ntot)*0)
+for(i in 1:1000){
+  egDF<-simulateSIR(Ntot,1,beta1,gamma1)
+  fs1<-Ntot - egDF$S[nrow(egDF)]
+  simDF$count[fs1 + 1]<- simDF$count[fs1 + 1]+1
+}
+ggplot(fDF,aes(x=I,y=probability))+geom_bar(stat='identity')+theme_grey(base_size=18)+geom_point(data=simDF,aes(x=x,y=count/1000),col='red')
+```
+
+
+```{r}
+
+ABC<-function(trueDF,N,maxBeta,maxGamma,howManyParticles){
+  #we are going to use approximate Bayesian computation
+  #and match based on the peak size, final size, and duration of the epidemic
+  #within some tolerance
+  #see e.g. the upcoming 'Handbook of Approximate Bayesian Computation' 
+  acc<-0
+  accDF<-data.frame(beta=0,gamma=0)
+  accDF<-accDF[-1,]
+  trueMax<-max(trueDF$I)
+  trueDuration<-max(trueDF$t)
+  trueFS<- N - min(trueDF$S)
+  while(acc < howManyParticles){
+    cb<-runif(1,0,maxBeta)
+    cg<-runif(1,0,maxGamma)
+    simRun<-simulateSIR(N,1,cb,cg)
+    canMax<-max(simRun$I)
+    canDuration<-max(simRun$t)
+    canFS<- N - min(simRun$S)
+    if(canMax == trueMax & abs(canFS - trueFS) <= 1 & abs(canDuration - trueDuration) < 2){
+      print(acc)
+      acc <- acc + 1
+      accDF[acc,]<-c(cb,cg)
+    }
+  }
+  return(accDF)
+}
+```
+
+```{r}
+preparedEarlier<-read.csv('preparedEarlier.csv',header=T,sep= ' ') #beta = 2, gamma = 1
+#ggplot(preparedEarlier,aes(x=t,y=I))+geom_line(size=2,col='red')+theme_grey(base_size=18)+xlim(0,10)+ylim(0,Ntot)
+tryABC<-ABC(preparedEarlier,20,10,5,10)
+ggplot(tryABC,aes(x=beta,y=gamma))+geom_point()+geom_density2d()+theme_grey(base_size=18)+xlim(0,10)+ylim(0,5)+geom_vline(xintercept=2,col='red')+geom_hline(yintercept=1,col='red')
+# tryABC<-ABC(egDF,Ntot,10,5,10)
+# ggplot(tryABC,aes(x=beta,y=gamma))+geom_point()+geom_density2d()+theme_grey(base_size=18)+xlim(0,10)+ylim(0,5)+geom_vline(xintercept=beta1,col='red')+geom_hline(yintercept=gamma1,col='red')
+```
+
+```{r}
+#tryABC2<-ABC(preparedEarlier,Ntot,10,5,1000)
+#write.table(tryABC2,'tryABC2.csv')
+tryABC2<-read.csv('tryABC2.csv',sep=' ')
+ggplot(tryABC2,aes(x=beta,y=gamma))+geom_point(alpha=0.4)+geom_density2d()+theme_grey(base_size=18)+xlim(0,10)+ylim(0,5)+geom_vline(xintercept=2,col='red')+geom_hline(yintercept=1,col='red')
+```
+
+
+
+
+
+
+
